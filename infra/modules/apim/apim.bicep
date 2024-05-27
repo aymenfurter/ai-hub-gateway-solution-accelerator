@@ -2,6 +2,7 @@ param name string
 param location string = resourceGroup().location
 param tags object = {}
 param entraAuth bool = false
+param subnetId string
 
 @minLength(1)
 param publisherEmail string = 'noreply@microsoft.com'
@@ -19,7 +20,7 @@ param audience string = 'https://cognitiveservices.azure.com/.default'
 param eventHubName string
 param eventHubEndpoint string
 
-
+var publicIpName = 'publicipapimaddr'
 var openAiApiBackendId = 'openai-backend'
 var openAiApiUamiNamedValue = 'uami-client-id'
 var openAiApiEntraNamedValue = 'entra-auth'
@@ -39,6 +40,21 @@ resource eventHub 'Microsoft.EventHub/namespaces/eventhubs@2023-01-01-preview' e
   name: eventHubName
 }
 
+resource publicIp 'Microsoft.Network/publicIPAddresses@2020-05-01' = {
+  name: publicIpName
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+    publicIPAddressVersion: 'IPv4'
+    dnsSettings: {
+      domainNameLabel: toLower('${publicIpName}-${uniqueString(resourceGroup().id)}')
+    }
+  }
+}
+
 resource apimService 'Microsoft.ApiManagement/service@2021-08-01' = {
   name: name
   location: location
@@ -56,6 +72,11 @@ resource apimService 'Microsoft.ApiManagement/service@2021-08-01' = {
   properties: {
     publisherEmail: publisherEmail
     publisherName: publisherName
+    virtualNetworkType: 'External'
+    publicIpAddressId: publicIp.id
+    virtualNetworkConfiguration: {
+      subnetResourceId: subnetId
+    }
     // Custom properties are not supported for Consumption SKU
     customProperties: sku == 'Consumption' ? {} : {
       'Microsoft.WindowsAzure.ApiManagement.Gateway.Security.Ciphers.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA': 'false'
@@ -83,7 +104,7 @@ resource apimOpenaiApi 'Microsoft.ApiManagement/service/apis@2022-08-01' = {
     path: 'openai'
     apiRevision: '1'
     displayName: 'Azure OpenAI API'
-    subscriptionRequired: entraAuth ? false:true 
+    subscriptionRequired: entraAuth ? false : true
     subscriptionKeyParameterNames: {
       header: 'api-key'
     }
@@ -102,7 +123,7 @@ resource apimAiSearchApi 'Microsoft.ApiManagement/service/apis@2022-08-01' = {
     path: 'search'
     apiRevision: '1'
     displayName: 'Azure AI Search API'
-    subscriptionRequired: entraAuth ? false:true 
+    subscriptionRequired: entraAuth ? false : true
     subscriptionKeyParameterNames: {
       header: 'api-key'
     }
@@ -145,7 +166,7 @@ resource retailProductAISearchApi 'Microsoft.ApiManagement/service/products/apiL
   }
 }
 
-resource retailProductPolicy 'Microsoft.ApiManagement/service/products/policies@2022-08-01' =  {
+resource retailProductPolicy 'Microsoft.ApiManagement/service/products/policies@2022-08-01' = {
   name: 'policy'
   parent: retailProduct
   properties: {
@@ -190,7 +211,7 @@ resource hrProductOpenAIApi 'Microsoft.ApiManagement/service/products/apiLinks@2
   }
 }
 
-resource hrProductPolicy 'Microsoft.ApiManagement/service/products/policies@2022-08-01' =  {
+resource hrProductPolicy 'Microsoft.ApiManagement/service/products/policies@2022-08-01' = {
   name: 'policy'
   parent: hrProduct
   properties: {
@@ -245,6 +266,7 @@ resource apiopenAiApiEntraNamedValue 'Microsoft.ApiManagement/service/namedValue
     value: entraAuth
   }
 }
+
 resource apiopenAiApiClientNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-01' = {
   name: openAiApiClientNamedValue
   parent: apimService
@@ -254,6 +276,7 @@ resource apiopenAiApiClientNamedValue 'Microsoft.ApiManagement/service/namedValu
     value: clientAppId
   }
 }
+
 resource apiopenAiApiTenantNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-01' = {
   name: openAiApiTenantNamedValue
   parent: apimService
@@ -263,7 +286,8 @@ resource apiopenAiApiTenantNamedValue 'Microsoft.ApiManagement/service/namedValu
     value: tenantId
   }
 }
-resource apimOpenaiApiAudienceiNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-01' =  {
+
+resource apimOpenaiApiAudienceiNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-01' = {
   name: openAiApiAudienceNamedValue
   parent: apimService
   properties: {
@@ -273,7 +297,7 @@ resource apimOpenaiApiAudienceiNamedValue 'Microsoft.ApiManagement/service/named
   }
 }
 
-resource openaiApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2022-08-01' =  {
+resource openaiApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2022-08-01' = {
   name: 'policy'
   parent: apimOpenaiApi
   properties: {

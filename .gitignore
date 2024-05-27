@@ -399,3 +399,6 @@ FodyWeavers.xsd
 
 /tests/**
 src/usage-ingestion-function/local.settings.json
+
+.azure
+.env

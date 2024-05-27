@@ -8,6 +8,11 @@ param sku object = {
   name: 'S0'
 }
 param deploymentCapacity int = 2
+param vnetId string
+param openaiSubnetName string = 'openai-subnet'
+param privateEndpointName string = '${name}-pe'
+param privateEndpointLocation string
+param privateDnsZoneGroupName string = '${name}-pe-dns'
 
 resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2018-11-30' existing = {
   name: managedIdentityName
@@ -26,6 +31,12 @@ resource account 'Microsoft.CognitiveServices/accounts@2023-05-01' = {
   }
   properties: {
     customSubDomainName: name
+    virtualNetworkRules: [
+      {
+        id: '${vnetId}/subnets/${openaiSubnetName}'
+      }
+    ]
+    publicNetworkAccess: 'Disabled'
   }
   sku: sku
 }
@@ -43,6 +54,50 @@ resource deployment 'Microsoft.CognitiveServices/accounts/deployments@2023-05-01
     capacity: deploymentCapacity
   }
 }]
+
+resource openAiPrivateEndpoint 'Microsoft.Network/privateEndpoints@2021-05-01' = {
+  name: privateEndpointName
+  location: privateEndpointLocation 
+  properties: {
+    subnet: {
+      id: '${vnetId}/subnets/${openaiSubnetName}' 
+    }
+    privateLinkServiceConnections: [
+      {
+        name: '${name}-plsc'
+        properties: {
+          privateLinkServiceId: account.id
+          groupIds: [
+            'account'
+          ]
+          requestMessage: 'Please approve the connection request.'
+        }
+      }
+    ]
+  }
+  dependsOn: [
+    account
+  ]
+}
+
+resource privateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' existing = {
+  name: 'privatelink.openai.azure.com'
+}
+
+resource privateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-09-01' = {
+  name: privateDnsZoneGroupName
+  parent: openAiPrivateEndpoint
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'privatelinkdns'
+        properties: {
+          privateDnsZoneId: privateDnsZone.id
+        }
+      }
+    ]
+  }
+}
 
 output openAiName string = account.name
 output openAiEndpointUri string = '${account.properties.endpoint}openai/'

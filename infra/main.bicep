@@ -2,15 +2,13 @@ targetScope = 'subscription'
 
 @minLength(1)
 @maxLength(64)
-@description('Name of the the environment which is used to generate a short unique hash used in all resources.')
+@description('Name of the environment which is used to generate a short unique hash used in all resources.')
 param environmentName string
 
 @minLength(1)
 @description('Primary location for all resources (filtered on available regions for Azure Open AI Service).')
 @allowed([ 'westeurope', 'southcentralus', 'australiaeast', 'canadaeast', 'eastus', 'eastus2', 'francecentral', 'japaneast', 'northcentralus', 'swedencentral', 'switzerlandnorth', 'uksouth' ])
 param location string
-
-//Leave blank to use default naming conventions
 
 @description('Name of the resource group. Leave blank to use default naming conventions.')
 param resourceGroupName string = ''
@@ -39,9 +37,6 @@ param cosmosDbAccountName string = ''
 @description('Name of the Stream Analytics resource. Leave blank to use default naming conventions.')
 param streamAnalyticsJobName string = ''
 
-
-// You can add more OpenAI instances by adding more objects to the openAiInstances object
-// Then update the apim policy xml to include the new instances
 @description('Object containing OpenAI instances. You can add more instances by adding more objects to this parameter.')
 param openAiInstances object = {
   openAi1: {
@@ -89,20 +84,52 @@ param tags object = { 'azd-env-name': environmentName }
 param entraAuth bool = false
 param entraTenantId string = ''
 param entraClientId string = ''
-param entraAudience string = '' 
+param entraAudience string = ''
 
+@description('Virtual network name')
+param vnetName string = 'vnet-${environmentName}'
+
+@description('Address space for the virtual network')
+param addressSpace string = '10.0.0.0/16'
+
+@description('Subnet name for APIM')
+param apimSubnetName string = 'apim-subnet'
+
+@description('Subnet address prefix for APIM')
+param apimSubnetPrefix string = '10.0.1.0/24'
+
+@description('Subnet name for OpenAI')
+param openaiSubnetName string = 'openai-subnet'
+
+@description('Subnet address prefix for OpenAI')
+param openaiSubnetPrefix string = '10.0.2.0/24'
 
 // Load abbreviations from JSON file
 var abbrs = loadJsonContent('./abbreviations.json')
 // Generate a unique token for resources
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 
-
 // Organize resources in a resource group
 resource resourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' = {
   name: !empty(resourceGroupName) ? resourceGroupName : '${abbrs.resourcesResourceGroups}${environmentName}'
   location: location
   tags: tags
+}
+
+// Create the virtual network and subnets
+module network './modules/network/network.bicep' = {
+  name: 'network'
+  scope: resourceGroup
+  params: {
+    vnetName: vnetName
+    location: location
+    addressSpace: addressSpace
+    apimSubnetName: apimSubnetName
+    apimSubnetPrefix: apimSubnetPrefix
+    openaiSubnetName: openaiSubnetName
+    openaiSubnetPrefix: openaiSubnetPrefix
+    tags: tags
+  }
 }
 
 module managedIdentity './modules/security/managed-identity-apim.bicep' = {
@@ -175,6 +202,11 @@ module openAis 'modules/ai/cognitiveservices.bicep' = [for (config, i) in items(
         }
       }
     ]
+    vnetId: network.outputs.vnetId
+    openaiSubnetName: openaiSubnetName 
+    privateEndpointName: '${config.value.name}-pe'
+    privateEndpointLocation: location
+    privateDnsZoneGroupName: '${config.value.name}-pe-dns'
   }
 }]
 
@@ -204,6 +236,7 @@ module apim './modules/apim/apim.bicep' = {
     audience: entraAuth ? entraAudience : null
     eventHubName: eventHub.outputs.eventHubName
     eventHubEndpoint: eventHub.outputs.eventHubEndpoint
+    subnetId: network.outputs.apimSubnetId
   }
 }
 
